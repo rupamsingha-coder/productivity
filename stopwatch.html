@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minimal Stopwatch</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        /* Base Setup */
+        body, html {
+            background-color: #000000;
+            color: #ffffff;
+            /* The ultimate barebone stack: System UI */
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            overflow: hidden; /* Prevent scrolling */
+            touch-action: manipulation; /* Improve touch response */
+        }
+
+        /* Typography & Layout */
+        .timer-digits {
+            /* Switch back to default sans-serif, using tabular-nums to keep alignment stable */
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: -0.03em; /* Slightly tighter tracking for large headers */
+            line-height: 1;
+            /* Removed text-shadow for pure pitch black contrast */
+        }
+
+        /* Reset Button Progress Ring */
+        .progress-ring__circle {
+            transition: stroke-dashoffset 0.2s ease-out;
+            transform-origin: 50% 50%;
+        }
+
+        /* The class added via JS when holding. 
+           We override the transition duration to 10s linear to match the logic.
+        */
+        .is-resetting .progress-ring__circle {
+            transition: stroke-dashoffset 10s linear;
+            stroke-dashoffset: 0 !important; /* Go to full */
+            stroke: #ef4444; /* Red color when critical */
+        }
+
+        /* Button Hover Effects */
+        .btn-interaction {
+            transition: transform 0.1s ease, opacity 0.2s ease;
+        }
+        .btn-interaction:active {
+            transform: scale(0.95);
+        }
+        
+        /* Hide selection */
+        * {
+            user-select: none;
+            -webkit-user-select: none;
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col items-center justify-center relative">
+
+    <!-- Main Display -->
+    <main class="flex flex-col items-center justify-center w-full z-10">
+        
+        <!-- Time -->
+        <!-- Responsive text size: massive on desktop, large on mobile -->
+        <div id="display" class="timer-digits text-[11vw] md:text-[9rem] font-light text-white">
+            00:00:00.00
+        </div>
+
+        <!-- Controls Container -->
+        <div class="flex items-center gap-16 mt-12 md:mt-20">
+            
+            <!-- Reset Button (Hold 10s) -->
+            <div class="relative flex items-center justify-center group">
+                <!-- SVG Progress Ring -->
+                <svg class="progress-ring absolute w-24 h-24 md:w-32 md:h-32 -rotate-90 pointer-events-none" viewBox="0 0 120 120">
+                    <!-- Background Track -->
+                    <circle 
+                        stroke="#333" 
+                        stroke-width="4" 
+                        fill="transparent" 
+                        r="52" 
+                        cx="60" 
+                        cy="60" 
+                    />
+                    <!-- Progress Fill -->
+                    <circle 
+                        id="resetProgress"
+                        class="progress-ring__circle" 
+                        stroke="white" 
+                        stroke-width="4" 
+                        fill="transparent" 
+                        r="52" 
+                        cx="60" 
+                        cy="60" 
+                        stroke-linecap="round"
+                    />
+                </svg>
+
+                <!-- Actual Button -->
+                <button id="resetBtn" 
+                    class="btn-interaction w-24 h-24 md:w-32 md:h-32 rounded-full flex items-center justify-center text-zinc-500 hover:text-white focus:outline-none"
+                    aria-label="Hold to Reset">
+                    <i data-lucide="rotate-ccw" class="w-8 h-8 md:w-10 md:h-10"></i>
+                </button>
+            </div>
+
+            <!-- Play/Pause Button -->
+            <button id="toggleBtn" 
+                class="btn-interaction w-24 h-24 md:w-32 md:h-32 bg-white rounded-full flex items-center justify-center text-black hover:bg-zinc-200 focus:outline-none"
+                aria-label="Start or Pause">
+                <i id="playIcon" data-lucide="play" class="w-10 h-10 md:w-12 md:h-12 fill-current ml-1"></i> <!-- ml-1 visually centers the play triangle -->
+                <i id="pauseIcon" data-lucide="pause" class="w-10 h-10 md:w-12 md:h-12 fill-current hidden"></i>
+            </button>
+        </div>
+
+        <!-- Minimal Instruction (Fades in only when needed) -->
+        <div id="hint" class="absolute bottom-12 text-zinc-600 text-xs md:text-sm font-bold tracking-widest uppercase opacity-0 transition-opacity duration-500">
+            Hold 10s to Reset
+        </div>
+
+    </main>
+
+    <script>
+        // --- Logic & State ---
+        let startTime = 0;
+        let elapsedTime = 0;
+        let timerInterval = null;
+        let isRunning = false;
+        
+        // Persistence Helpers
+        function saveState() {
+            localStorage.setItem('sw_startTime', startTime);
+            localStorage.setItem('sw_elapsedTime', elapsedTime);
+            localStorage.setItem('sw_isRunning', isRunning);
+        }
+
+        // Reset Logic State
+        let resetTimeout = null;
+        let isHoldingReset = false;
+        const RESET_DURATION = 10000; // 10 seconds
+
+        // --- DOM Elements ---
+        const display = document.getElementById('display');
+        const toggleBtn = document.getElementById('toggleBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const resetProgress = document.getElementById('resetProgress');
+        const playIcon = document.getElementById('playIcon');
+        const pauseIcon = document.getElementById('pauseIcon');
+        const hint = document.getElementById('hint');
+        const resetButtonContainer = resetBtn.parentElement;
+
+        // Initialize Icons
+        lucide.createIcons();
+
+        // Initialize Ring
+        const circle = resetProgress;
+        const radius = circle.r.baseVal.value;
+        const circumference = radius * 2 * Math.PI;
+        
+        circle.style.strokeDasharray = `${circumference} ${circumference}`;
+        circle.style.strokeDashoffset = circumference;
+
+        // --- Formatting Time ---
+        function formatTime(ms) {
+            const totalSeconds = Math.floor(ms / 1000);
+            const hours = Math.floor(totalSeconds / 3600);
+            const minutes = Math.floor((totalSeconds % 3600) / 60);
+            const seconds = totalSeconds % 60;
+            const milliseconds = Math.floor((ms % 1000) / 10);
+
+            const h = String(hours).padStart(2, '0');
+            const m = String(minutes).padStart(2, '0');
+            const s = String(seconds).padStart(2, '0');
+            const msStr = String(milliseconds).padStart(2, '0');
+            
+            return `${h}:${m}:${s}.${msStr}`;
+        }
+
+        function updateDisplay() {
+            // Update logic to handle both running and paused states for persistence
+            const time = isRunning ? (Date.now() - startTime + elapsedTime) : elapsedTime;
+            display.textContent = formatTime(time);
+        }
+
+        // --- Toggle Play/Pause ---
+        toggleBtn.addEventListener('click', () => {
+            if (isRunning) {
+                // Pause
+                clearInterval(timerInterval);
+                elapsedTime += Date.now() - startTime;
+                isRunning = false;
+                saveState(); // Save state on pause
+                
+                // UI Update
+                toggleBtn.classList.remove('bg-zinc-200');
+                toggleBtn.classList.add('bg-white');
+                playIcon.classList.remove('hidden');
+                pauseIcon.classList.add('hidden');
+                updateDisplay();
+            } else {
+                // Start
+                startTime = Date.now();
+                timerInterval = setInterval(updateDisplay, 10); // Update every 10ms
+                isRunning = true;
+                saveState(); // Save state on start
+                
+                // UI Update
+                toggleBtn.classList.remove('bg-white');
+                toggleBtn.classList.add('bg-zinc-200'); // Slightly dimmer when active
+                playIcon.classList.add('hidden');
+                pauseIcon.classList.remove('hidden');
+            }
+        });
+
+        // --- Reset Logic (10s Hold) ---
+
+        const startReset = (e) => {
+            e.preventDefault(); // Prevent text selection or ghostly touches
+            if (elapsedTime === 0 && !isRunning) return; // Nothing to reset
+
+            isHoldingReset = true;
+            resetButtonContainer.classList.add('is-resetting');
+            hint.style.opacity = '1';
+            
+            // Start the 10s countdown
+            resetTimeout = setTimeout(() => {
+                triggerReset();
+            }, RESET_DURATION);
+        };
+
+        const cancelReset = (e) => {
+            if (!isHoldingReset) return;
+            
+            isHoldingReset = false;
+            resetButtonContainer.classList.remove('is-resetting');
+            hint.style.opacity = '0';
+            
+            // Clear timeout
+            if (resetTimeout) clearTimeout(resetTimeout);
+            
+            // Reset Ring Animation Manually (force reflow if needed, but CSS handles transition back)
+            // The CSS rule '.is-resetting' removal triggers the fast transition back to offset=circumference
+        };
+
+        const triggerReset = () => {
+            // Visual feedback
+            if (navigator.vibrate) navigator.vibrate(200);
+            
+            // Logic reset
+            clearInterval(timerInterval);
+            isRunning = false;
+            startTime = 0;
+            elapsedTime = 0;
+            display.textContent = "00:00:00.00";
+            
+            // Clear memory
+            localStorage.removeItem('sw_startTime');
+            localStorage.removeItem('sw_elapsedTime');
+            localStorage.removeItem('sw_isRunning');
+            
+            // UI Reset
+            playIcon.classList.remove('hidden');
+            pauseIcon.classList.add('hidden');
+            
+            // Stop holding state
+            isHoldingReset = false;
+            resetButtonContainer.classList.remove('is-resetting');
+            hint.textContent = "Reset Complete";
+            setTimeout(() => { 
+                hint.style.opacity = '0'; 
+                setTimeout(() => hint.textContent = "Hold 10s to Reset", 500);
+            }, 1000);
+        };
+
+        // Mouse Events
+        resetBtn.addEventListener('mousedown', startReset);
+        resetBtn.addEventListener('mouseup', cancelReset);
+        resetBtn.addEventListener('mouseleave', cancelReset);
+
+        // Touch Events (for mobile)
+        resetBtn.addEventListener('touchstart', startReset);
+        resetBtn.addEventListener('touchend', cancelReset);
+        resetBtn.addEventListener('touchcancel', cancelReset);
+
+        // Load State on Init
+        function loadState() {
+            const storedStartTime = localStorage.getItem('sw_startTime');
+            const storedElapsedTime = localStorage.getItem('sw_elapsedTime');
+            const storedIsRunning = localStorage.getItem('sw_isRunning');
+
+            if (storedStartTime) startTime = parseInt(storedStartTime);
+            if (storedElapsedTime) elapsedTime = parseInt(storedElapsedTime);
+            
+            if (storedIsRunning === 'true') {
+                isRunning = true;
+                timerInterval = setInterval(updateDisplay, 10);
+                
+                // Update UI for running state
+                toggleBtn.classList.remove('bg-white');
+                toggleBtn.classList.add('bg-zinc-200');
+                playIcon.classList.add('hidden');
+                pauseIcon.classList.remove('hidden');
+            } else {
+                // Update display for paused state (so it doesn't show 00:00:00.00 on reload)
+                updateDisplay();
+            }
+        }
+        
+        loadState();
+
+    </script>
+</body>
+</html>

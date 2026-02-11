@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NEET 2026 Countdown</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        /* Base Setup */
+        body, html {
+            background-color: #000000;
+            color: #ffffff;
+            /* Barebone system stack */
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            overflow: hidden;
+            touch-action: manipulation;
+        }
+
+        /* Typography */
+        .countdown-digits {
+            font-variant-numeric: tabular-nums;
+            letter-spacing: -0.06em; /* Tighter tracking for the massive number */
+            line-height: 1;
+        }
+
+        /* Hide selection */
+        * {
+            user-select: none;
+            -webkit-user-select: none;
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col items-center justify-center relative">
+
+    <main class="flex flex-col items-center justify-center w-full z-10">
+        
+        <!-- Main Display: Days Only -->
+        <div id="days" class="countdown-digits text-[40vw] md:text-[30rem] font-light text-white leading-none select-none">
+            000
+        </div>
+
+    </main>
+
+    <script>
+        // --- Configuration ---
+        // NEET is typically the first Sunday of May. 
+        // For 2026, the first Sunday is May 3rd.
+        // Exam usually starts at 2:00 PM IST.
+        const targetDate = new Date("May 3, 2026 14:00:00").getTime();
+
+        // --- DOM Elements ---
+        const daysEl = document.getElementById('days');
+
+        // --- Update Function ---
+        function updateCountdown() {
+            const now = new Date().getTime();
+            const distance = targetDate - now;
+
+            if (distance < 0) {
+                // Exam Started / Passed
+                daysEl.textContent = "000";
+                return;
+            }
+
+            // Calculations - Only Days
+            const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+
+            // Formatting
+            const dStr = String(days).padStart(3, '0'); // Ensure 3 digits for days (e.g. 085)
+
+            // Render
+            daysEl.textContent = dStr;
+        }
+
+        // --- Init ---
+        // Update regularly to catch midnight transitions
+        setInterval(updateCountdown, 1000);
+        updateCountdown(); // Initial call
+
+    </script>
+</body>
+</html>
